@@ -1,0 +1,15 @@
+/* 针对实时预览模式与阅读视图下的所有图片默认居中 */
+.image-embed,
+.markdown-rendered img,
+.cm-embed-block.cm-image-embed {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.markdown-rendered img {
+  display: block !important;
+  margin: 0 auto !important;
+}
