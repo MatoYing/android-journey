@@ -22,3 +22,8 @@ wlan0     Link encap:Ethernet  HWaddr 66:b4:1b:28:6f:22  Driver cnss_pci
 # .....
 ```
 另外，想执行上面的东西，在车机和你的电脑连上电脑后，你首先得借一条 USB，连上电脑，进入`adb shell`，然后用上面的命令去查看 wlan0，否则进入不了 `adb shell`。
+
+
+
+
+adb shell am force-stop com.patac.hmi.settings：会停止进程及其所有关联组件（Activity、Service、BroadcastReceiver 等）

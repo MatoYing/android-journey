@@ -3,6 +3,8 @@
   "customLanguages": [],
   "usedCount": {
     "java": 1,
-    "shell": 2
+    "shell": 3,
+    "groovy": 5,
+    "gradle": 1
   }
 }

@@ -1,15 +1,57 @@
-/* 针对实时预览模式与阅读视图下的所有图片默认居中 */
-.image-embed,
-.markdown-rendered img,
+/* =======================================================
+ * 1. 严格还原 Typora 的两种换行间距
+ * ======================================================= */
+
+/* (1) 自然折行（不按回车）：紧凑且舒适的 Typora 行高 */
+.markdown-rendered,
+.cm-content {
+  line-height: 1.6 !important;
+}
+
+/* (2) 按回车产生的段落（阅读视图） */
+.markdown-rendered p {
+  margin-top: 0.8em !important;
+  margin-bottom: 0.8em !important;
+}
+
+/* (3) 按回车产生的段落（实时预览/编辑模式） 
+   通过为每个回车块增加上下 padding，拉开回车换行的间距 */
+.cm-editor .cm-line:not(.HyperMD-list-line):not(.HyperMD-header):not(.HyperMD-quote) {
+  padding-top: 0.4em !important;
+  padding-bottom: 0.4em !important;
+}
+
+/* (4) 列表项内部微调：防止列表每项之间被拉得过宽 */
+.markdown-rendered li,
+.cm-editor .HyperMD-list-line {
+  line-height: 1.5 !important;
+  padding-top: 0.1em !important;
+  padding-bottom: 0.1em !important;
+}
+
+
+/* =======================================================
+ * 2. 全局图片居中显示
+ * ======================================================= */
+
+/* 阅读模式图片居中 */
+.markdown-rendered .image-embed,
+.markdown-rendered img {
+  display: block !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  text-align: center !important;
+}
+
+/* 实时预览模式图片居中 */
+.cm-embed-block:has(.image-embed),
 .cm-embed-block.cm-image-embed {
   display: flex !important;
   justify-content: center !important;
-  align-items: center !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+  width: 100% !important;
 }
 
-.markdown-rendered img {
-  display: block !important;
+.image-embed img {
+  display: inline-block !important;
   margin: 0 auto !important;
 }
