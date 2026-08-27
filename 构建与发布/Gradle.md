@@ -114,3 +114,21 @@ JAVA_HOME="/Users/mato/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents
 
 JAVA_HOME="/Users/mato/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home" bash ./gradlew :model:publishToMavenLocal
 ```
+
+
+
+
+### 如何验证 compileOnly 依赖在目标设备上是否可用
+最直接有效的方式是通过 Class.forName 运行时验证。
+```Java
+try {
+    Class<?> clazz = Class.forName("com.cls.vehicle.v1.OSRVM2", true, getClassLoader());
+    Log.d("Verify", "类加载成功，ClassLoader: " + clazz.getClassLoader());
+} catch (ClassNotFoundException e) {
+    Log.e("Verify", "类不存在 (ClassNotFoundException)", e);
+} catch (NoClassDefFoundError e) {
+    Log.e("Verify", "类定义缺失或其依赖项缺失 (NoClassDefFoundError)", e);
+} catch (Throwable t) {
+    Log.e("Verify", "初始化或加载失败", t);
+}
+```

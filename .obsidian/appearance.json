@@ -1,7 +1,7 @@
 {
   "enabledCssSnippets": [
-    "image-center"
+    "typora"
   ],
   "showRibbon": true,
-  "cssTheme": ""
+  "cssTheme": "GitHub Theme"
 }

@@ -1,5 +1,6 @@
 {
   "newLinkFormat": "relative",
   "attachmentFolderPath": "assets",
-  "livePreview": true
+  "livePreview": true,
+  "useMarkdownLinks": false
 }
