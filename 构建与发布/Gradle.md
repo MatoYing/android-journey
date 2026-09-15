@@ -483,3 +483,39 @@ try {
 
 
 #### 多项目构建实战
+
+
+
+
+
+
+
+这么设计的目的是什么
+
+![image-20260915135944569](../../../../Library/Application Support/typora-user-images/image-20260915135944569.png)
+
+
+
+![image-20260915140343959](../../../../Library/Application Support/typora-user-images/image-20260915140343959.png)
+
+
+
+
+
+![image-20260915142249317](../../../../Library/Application Support/typora-user-images/image-20260915142249317.png)
+
+
+
+
+
+Gradle生命周期
+
+![image-20260915153131819](../../../../Library/Application Support/typora-user-images/image-20260915153131819.png)
+
+
+
+
+
+
+
+![image-20260915155220732](../../../../Library/Application Support/typora-user-images/image-20260915155220732.png)
