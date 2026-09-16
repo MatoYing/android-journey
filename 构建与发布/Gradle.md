@@ -174,16 +174,9 @@ buildTypes {
 
 + versionNameSuffix：版本名后缀，在 versionName 后面追加一段字符串，仅用于展示，不影响安装行为（用户在"应用信息"页面能看到版本号，比如 1.0.0-debug）。
 
-最后这块常用的命令如下：
-
-+ `./gradlew assembleDebug`：构建所有 flavor 的 Debug 变体。
-+ `./gradlew assembleRelease`：构建所有 flavor 的 Release 变体。
-+ `./gradlew assembleVcuproDebug`：仅构建 vcupro 的 Debug 变体。
-+ `./gradlew assemble`：构建全部变体。
-
 **2）Product Flavor**
 
-Build Type 决定怎么构建（混淆、签名等），Product Flavor 决定构建什么版本（不同品牌、地区等）。常见结构如下：
+Build Type 决定怎么构建（混淆、签名等），Product Flavor 决定构建什么版本（不同品牌、地区等）。常见的标准结构如下（把其他常见的内容也加了进来）：
 
 ```groovy
 android {
@@ -200,35 +193,61 @@ android {
     flavorDimensions = ["tier", "env"]
 
     productFlavors {
+        // 1）层级
+        // 免费版
         free {
             dimension "tier"
             applicationIdSuffix ".free"
             buildConfigField "boolean", "IS_PRO", "false"
         }
+        // 付费版
         pro {
             dimension "tier"
             applicationIdSuffix ".pro"
             buildConfigField "boolean", "IS_PRO", "true"
         }
+        // 2）环境
+        // 开发环境
         dev {
             dimension "env"
             buildConfigField "String", "BASE_URL", '"https://dev.api.com"'
         }
+        // 生产环境
         prod {
             dimension "env"
             buildConfigField "String", "BASE_URL", '"https://api.com"'
         }
     }
+    // 等同于下面这样写（当然，sourceSets也得变）
+    // productFlavors {
+    //     freeDev   { ... }
+    //     freeProd  { ... }
+    //     proDev    { ... }
+    //     proProd   { ... }
+    // }
   
     sourceSets {
         free {
             java.srcDirs = ['src/main/java', 'src/free/java', 'src/shared_promo/java']
             res.srcDirs = ['src/main/res', 'src/free/res']
         }
+        pro {
+            java.srcDirs = ['src/main/java', 'src/pro/java']
+            res.srcDirs = ['src/main/res', 'src/pro/res']
+        }
+        dev {
+            java.srcDirs = ['src/main/java', 'src/dev/java']
+            res.srcDirs = ['src/main/res', 'src/dev/res']
+        }
+        prod {
+            java.srcDirs = ['src/main/java', 'src/prod/java']
+            res.srcDirs = ['src/main/res', 'src/prod/res']
+        }
     }
 
     variantFilter { variant ->
         def names = variant.flavors*.name
+        // 排除free+prod的组合
         if (names.contains("free") && names.contains("prod")) {
             setIgnore(true)
         }
@@ -245,13 +264,16 @@ android {
 }
 
 dependencies {
+    // 所有flavor都会引入
     implementation 'androidx.core:core-ktx:1.12.0'
+    // 仅paid引入
     proImplementation 'com.stripe:stripe-android:20.0.0'
+    // 仅free引入
     freeImplementation 'com.google.ads:ads:1.0.0'
 }
 ```
 
-拆开来讲，首先 flavorDimensions 代表了维度，可以声明多个维度。TODO 意义
+拆开来讲，首先 flavorDimensions 用于声明 flavor 的维度，可定义多个维度，Gradle 会自动对各维度的 flavor 做笛卡尔积，生成所有组合 variant。例如两个维度 tier（free / pro）× env（dev / prod），会构建出 freeDev、freeProd、proDev、proProd 四个 variant。
 
 defaultConfig、productFlavors 定义了各个 flavor，可以自定义如下内容：
 
@@ -275,77 +297,50 @@ defaultConfig、productFlavors 定义了各个 flavor，可以自定义如下内
 
 + resValue：类似 buildConfigField，在代码和布局中都能引用，`resValue "资源类型", "资源名", "值"`，`R.string.XXX `。
 
-这些属性，包括 Build Type 中介绍的，在 defaultConfig、productFlavors、buildTypes 中都能配置（buildConfigField 和 resValue 除外，只能放 defaultConfig 和 productFlavors）。整体是覆盖的关系 flavor > buildType > defaultConfig（applicationIdSuffix 是拼接而非覆盖）
+==这些属性，包括 Build Type 中介绍的，在 defaultConfig、productFlavors、buildTypes 中都能配置（buildConfigField 和 resValue 除外，只能放 defaultConfig 和 productFlavors）。整体是覆盖的关系 flavor > buildType > defaultConfig（applicationIdSuffix 是拼接而非覆盖）==
 
-Source Set，每个 flavor 可以拥有独立的源码、资源、Manifest。
+**3）sourceSets**
 
-dependencies，使用 `<flavorName>Implementation` 为特定 flavor 添加依赖
+每个 flavor 可以拥有独立的源码、资源、Manifest。
 
-Source Set，每个 flavor 可以拥有独立的源码、资源、Manifest。
+**4）dependencies**
 
-```groovy
-dependencies {
-    // 所有 flavor 共享 TODO 所有还是main？
-    implementation 'androidx.appcompat:appcompat:1.6.0'
+使用 `<flavorName>Implementation` 为特定 flavor 添加依赖。
 
-    // 仅 paid 引入
-    paidImplementation 'com.stripe:stripe-android:20.0.0'
-
-    // 仅 free 引入（广告 SDK）
-    freeImplementation 'com.google.ads:ads-sdk:1.0.0'
-}
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-missingDimensionStrategy，当应用模块定义了某个维度，但依赖的 library 模块没有该维度时，必须告诉 Gradle 选择 library 的哪个默认 flavor
-
-```groovy
-defaultConfig {
-    // 告诉 Gradle：当依赖的 library 没有 "env" 维度时，默认选 "prod"
-    missingDimensionStrategy "env", "prod"
-}
-```
-
-
-
-过滤不需要的 Variant
+**5）variantFilter**
 
 多维度组合可能产生无意义的 variant，可以用 variantFilter 排除
 
+**6）missingDimensionStrategy**
+
+当引入定义了 productFlavors 的库依赖（AAR 或本地模块）时，有以下几种情况：
+
++ 维度名相同，有同名 flavor → 自动匹配，编译成功
++ 维度名相同，没有同名 flavor → 编译失败，需用 missingDimensionStrategy 指定
++ 维度名不同（AAR 有而项目没有）→ 编译失败，需用 missingDimensionStrategy 指定
+
+missingDimensionStrategy 就是用来解决 Gradle 无法自动匹配 AAR 的 flavor 时，手动指定使用哪个 flavor 的问题。
+
 ```groovy
 android {
-    variantFilter { variant ->
-        def names = variant.flavors*.name
-        // 排除 free + prod 的组合
-        if (names.contains("free") && names.contains("prod")) {
-            setIgnore(true)
-        }
+    defaultConfig {
+        // 告诉Gradle：A维度选a1 flavor，B维度选b1 flacor
+        missingDimensionStrategy "A", "a1"
+        missingDimensionStrategy "B", "b1"
     }
 }
 ```
 
+如果 AAR 没有定义 productFlavors，就完全不需要管 missingDimensionStrategy，直接用就行。
 
+**7）常用命令**
 
+最后这块常用的命令如下：
 
-
-Gradle 最终构建的最小单元是 Variant，它是 Flavor 和 BuildType 的组合。构建命令格式为 `assemble<Flavor><BuildType>`：
-
-
-
-
++ `./gradlew assembleDebug`：构建所有 flavor 的 Debug 变体（Gradle 最终构建的最小单元是 Variant，它是 Flavor 和 BuildType 的组合。构建命令格式为 `assemble<Flavor><BuildType>`）。
++ `./gradlew assembleRelease`：构建所有 flavor 的 Release 变体。
++ `./gradlew assembleVcuproDebug`：仅构建 vcupro 的 Debug 变体。
++ `./gradlew assemble`：构建全部变体。
 
 #### APK 与 AAR
 
@@ -385,36 +380,6 @@ settings（APK）
 
 
 
-#### missingDimensionStrategy
-
-Android 多模块项目中，每个模块可以定义自己的 flavor dimension（维度）和 product flavor（变体）。当模块 A 依赖模块 B 时：
-维度名相同 → Gradle 自动匹配同名 flavor，无需额外配置
-维度名不同 → Gradle 无法匹配，构建直接报错
-
-
-Gradle 不知道该选目标模块的哪个 flavor → 编译失败。
-
-当依赖的目标模块有当前模块没有的 flavor dimension
-
-触发条件
-依赖的目标模块有当前模块没有的 flavor dimension
-作用
-为缺失的维度指定默认 flavor，实现跨模块自动匹配
-
-```groovy
-// 所有flavor都依赖:common
-implementation project(path: ':common')
-
-productFlavors {
-	// 各flavor自己指定依赖:common的哪个flavor
-	vcupro {
-	    missingDimensionStrategy "common", "vcupro"
-	}
-}
-```
-
-
-
 #### Maven Publish 依赖管理
 
 
@@ -449,7 +414,7 @@ try {
 
 
 
-#### AAR 与 APK
+
 
 
 
