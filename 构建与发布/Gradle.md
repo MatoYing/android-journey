@@ -31,6 +31,7 @@ bash，地址
 + `./gradlew test`：运行所有模块的单元测试。
 + `./gradlew :drive:dependencies`：查看 Drive 模块的依赖树。
 + `./gradlew :domain:publishToMavenLocal`：将 domain 模块的构建产物发布到本地 Maven 仓库（~/.m2/repository/），本地其它项目只需配置 `mavenLocal()` 即可直接引用，无需发布到远程 Maven 仓库。
+
 ### Android Gradle 构建系统（AGP）
 
 AGP = Android Gradle Plugin，即 Android 的 Gradle 插件。就是每个模块 build.gradle 顶部 apply 的这个东西：
@@ -342,6 +343,14 @@ android {
 + `./gradlew assembleVcuproDebug`：仅构建 vcupro 的 Debug 变体。
 + `./gradlew assemble`：构建全部变体。
 
+### Gradle 原生
+
+声明周期
+
+
+
+
+
 #### APK 与 AAR
 
 
@@ -382,11 +391,186 @@ settings（APK）
 
 #### Maven Publish 依赖管理
 
+Gradle 通过 maven-publish 插件将构建产物（JAR、AAR 等）发布到 Maven 仓库（如本地 Maven 缓存、私有 Artifactory、Maven Central）。
 
 
 
 
-`apply plugin: 'maven-publish'`
+
+
+
+```groovy
+plugins {
+    id 'maven-publish'
+}
+```
+
+主要由三部分组成：
+
++ Publication：定义"发布什么"——groupId、artifactId、version、产物
++ Repository：
++ Component：
+
+```groovy
+android {
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+publishing {
+    publications {
+        release(MavenPublication) {
+            groupId = 'com.example'
+            artifactId = 'my-android-lib'
+            version = '1.0.0'
+            afterEvaluate {
+                from components.release
+            }
+        }
+    }
+  
+    repositories {
+        maven {
+            name = 'myRepo'
+            url = uri("https://maven.example.com/releases")
+            credentials {
+                username = project.findProperty('mavenUser') ?: ''
+                password = project.findProperty('mavenPass') ?: ''
+            }
+        }
+    }
+}
+```
+
+
+
+
+
+发布产物结构
+
+```groovy
+com/example/my-library/1.0.0/
+├── my-library-1.0.0.jar
+├── my-library-1.0.0.pom          # POM 元数据
+├── my-library-1.0.0-sources.jar  # 源码（可选）
+├── my-library-1.0.0-javadoc.jar  # 文档（可选）
+├── my-library-1.0.0.module       # Gradle Module Metadata
+└── maven-metadata.xml            # 版本索引
+```
+
+
+
+
+
+
+
+```
+# 发布到仓库
+./gradlew publish
+
+# 发布到本地 Maven (~/.m2/repository)
+./gradlew publishToMavenLocal
+
+# 只发布某个 publication
+./gradlew publishMyLibraryPublicationToMyRepoRepository
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+api：传递给消费者（编译+运行时都可见）
+implementation：不传递（编译可见，对消费者隐藏）
+compileOnly：仅编译期可见，不打包
+runtimeOnly：仅运行时可见
+
+
+
+```groovy
+repositories {
+    google()          // Google Maven
+    mavenCentral()    // Maven Central
+    maven { url 'https://jitpack.io' }  // 自定义仓库
+    
+    // 本地 Maven 仓库
+    maven { url uri("${project.rootDir}/local-repo") }
+    
+    // 私有仓库 + 认证
+    maven {
+        url 'https://nexus.example.com/repository/maven-releases/'
+        credentials {
+            username findProperty('nexusUser')
+            password findProperty('nexusPass')
+        }
+    }
+}
+
+
+
+// 版本管理策略
+// 方式一：直接声明
+implementation 'com.example:lib:1.2.3'
+
+// 方式二：版本目录 (Version Catalog) — Gradle 7.0+
+// settings.gradle
+dependencyResolutionManagement {
+    versionCatalogs {
+        libs {
+            version('retrofit', '2.9.0')
+            library('retrofit-core', 'com.squareup.retrofit2', 'retrofit').versionRef('retrofit')
+        }
+    }
+}
+// build.gradle
+dependencies {
+    implementation libs.retrofit.core
+}
+
+// 方式三：buildSrc / platform (BOM)
+dependencies {
+    implementation platform('com.example:bom:1.0.0')
+    implementation 'com.example:lib-a'  // 版本由 BOM 管理
+}
+
+
+//依赖解析与冲突处理
+configurations.all {
+    // 强制指定版本
+    resolutionStrategy {
+        force 'com.example:lib:2.0.0'
+        
+        // 缓存策略
+        cacheDynamicVersionsFor 10, 'minutes'
+        cacheChangingModulesFor 4, 'hours'
+    }
+    
+    // 排除传递依赖
+    exclude group: 'com.unwanted', module: 'bad-lib'
+}
+./gradlew app:dependencies --configuration implementation
+```
+
+
+
+
+
+
+
+
+
+
 
 ```shell
 JAVA_HOME="/Users/mato/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home" bash ./gradlew :domain:publishToMavenLocal
