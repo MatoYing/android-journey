@@ -1,0 +1,32 @@
+.obsidian/app.json
+  h_754d50daf215ac 1
+.obsidian/appearance.json
+  h_754d50daf215ac 1
+.obsidian/core-plugins.json
+  h_754d50daf215ac 1-33
+.obsidian/workspace.json
+  h_754d50daf215ac 1-210
+Java/异常处理.md
+  h_754d50daf215ac 207-306
+"测试框架与工具/Instrumented 测试/Instrumentation Test.md"
+  h_754d50daf215ac 1,6-7
+"测试框架与工具/单元测试/JUnit 4.md"
+  h_754d50daf215ac 1-528
+测试框架与工具/单元测试/Mockito.md
+  h_754d50daf215ac 1-269
+项目构建/CICD.md
+  h_754d50daf215ac 1-20
+项目构建/Gradle.md
+  h_754d50daf215ac 1-6,41-610,922,924,926-930,932,934-939,941,943-947,949-951,953-955,957-964,966-975,978-1014,1016-1036,1038,1040-1050,1052,1054,1056-1059,1061,1063-1067,1069,1071,1073-1077,1079-1084,1086,1088-1093,1095,1097,1100-1102,1105-1117,1119,1122,1125-1129,1136-1159,1162-1168,1170,1172,1175-1188,1195,1197,1201-1203,1214-1248,1281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e6ae0feca06505dd5d3f669285cf3e641abedfa3",
+  "prompts": {},
+  "humans": {
+    "h_754d50daf215ac": {
+      "author": "sjma67 <sichao_yan@saic-gm.com>"
+    }
+  }
+}
