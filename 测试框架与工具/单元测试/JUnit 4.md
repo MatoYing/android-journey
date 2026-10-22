@@ -520,6 +520,101 @@ public class CalculatorAddTest {
 
 注意：一个类里只要用了 `@RunWith(Parameterized.class)`，所有 `@Test` 都会按参数化跑，想写普通测试尽量分出去单独一个类，否则会跟着 Parameters 的数量重复跑多遍。
 
+#### @Rule
+
+用来给每个测试方法附加通用行为，例如创建和清理临时目录、设置超时，或在测试前后执行资源管理逻辑。简单来说就是把 @Before 和 @After 的逻辑包到 @Rule 里，封装成可复用的“组件”。常用的内置规则如下：
+
++ TemporaryFolder：管理临时文件和目录。
++ TestName：获取当前测试方法的名称。
++ Timeout：限制测试方法的执行时间。
++ ExternalResource：在测试前后获取、释放外部资源。
+
+```java
+public class FileTest {
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
+
+    @Test
+    public void createsFile() throws IOException {
+        File file = tempFolder.newFile("data.txt");
+        assertTrue(file.exists());
+
+        // 不用TemporaryFolder时，需要自己创建并清理临时文件：
+        // File file = File.createTempFile("data", ".txt");
+        // try {
+        //     assertTrue(file.exists());
+        // } finally {
+        //     file.delete();
+        // }
+    }
+}
+```
+
+上面这四个类是 JUnit 内置的，必须搭配 @Rule 去使用，否责没有意义。比如这个 TemporaryFolder，你不加 @Rule 的话，还不如直接用 `new File()`。
+
+也可以实现自定义 Rule：
+
+```java
+// 自定义Rule需要实现TestRule接口
+public class MyCustomRule implements TestRule {
+    
+    @Override
+    public Statement apply(final Statement base, final Description description) {
+        return new Statement() {
+            @Override
+            public void evaluate() throws Throwable {
+                System.out.println("测试前逻辑");
+                System.out.println("执行测试：" + description.getMethodName());
+                
+                try {
+                    base.evaluate(); // 执行原始测试方法
+                } finally {
+                    System.out.println("测试后清理逻辑");
+                }
+            }
+        };
+    }
+}
+
+// 使用自定义Rule
+public class MyTest {
+    @Rule
+    public MyCustomRule myRule = new MyCustomRule();
+
+    @Test
+    public void testSomething() {
+        // 这里没有手动调用myRule，是因为如果只是包装逻辑，那么不需要手动调用；如果调工具内在的工具方法才要手动调用
+        System.out.println("这是测试方法体");
+    }
+}
+
+// 输出
+// 测试前逻辑
+// 执行测试：testSomething
+// 这是测试方法体
+// 测试后清理逻辑
+```
+
+当存在多个 Rule 时，Rule 的执行顺序如下：
+
+```java
+public class OrderTest {
+    @Rule
+    public Rule1 rule1 = new Rule1();
+    
+    @Rule
+    public Rule2 rule2 = new Rule2();
+
+    @Test
+    public void test() {
+        // 执行顺序：
+        // rule1.before -> rule2.before -> test() -> rule2.after -> rule1.after
+    }
+}
+```
+
+@Rule 相当于封装了 @Before + @After，与之相对的，@ClassRule 封装了 @BeforeClass + @AfterClass。
+
 #### JUnit 4 和 5 的区别
 
 + 参数化测试更简洁，不需要上文讲到的步骤，不用换 Runner、不用拆类，`@ParameterizedTest` 一个注解搞定。

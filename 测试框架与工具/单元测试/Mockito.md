@@ -44,7 +44,6 @@ public class UserServiceTest {
 
 ```java
 // 启用Mockito注解处理器，这样测试运行前会扫描所有@Mock字段、@InjectMocks字段，完成对象的Mock及注入
-// 并可
 @RunWith(MockitoJUnitRunner.class)
 public class UserServiceTest {
 
