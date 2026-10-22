@@ -1,0 +1,84 @@
+AI/编程工作流.md
+  h_754d50daf215ac 1-2
+"Other/Android开发艺术探索/01 Activity的生命周期和启动模式.md"
+  h_754d50daf215ac 1-500
+"Other/Android开发艺术探索/02 IPC机制.md"
+  h_754d50daf215ac 1-639
+"Other/Android开发艺术探索/03 View的事件体系.md"
+  h_754d50daf215ac 1-1023
+"Other/Android开发艺术探索/04 View的工作原理.md"
+  h_754d50daf215ac 1
+"Other/Android开发艺术探索/06 Android的Drawable.md"
+  h_754d50daf215ac 1-417
+"Other/Android开发艺术探索/07 Android动画深入分析.md"
+  h_754d50daf215ac 1-794
+"Other/Android开发艺术探索/09 四大组件的工作过程.md"
+  h_754d50daf215ac 1-158
+"Other/Android开发艺术探索/10 Android的消息机制.md"
+  h_754d50daf215ac 1-101
+Other/Android开发艺术探索/扩展.md
+  h_754d50daf215ac 1-3
+Other/Android面试宝典/Android菜鸟.md
+  h_754d50daf215ac 1-1011
+Other/Kotlin.md
+  h_754d50daf215ac 1-161
+Other/其他/加密算法.md
+  h_754d50daf215ac 1,7-28
+Other/其他/异步编程/RxJava/RxJava.md
+  h_754d50daf215ac 1-1220
+Other/其他/异步编程/RxJava/面试.md
+  h_754d50daf215ac 1-802
+Other/其他/性能优化.md
+  h_754d50daf215ac 1-36
+Other/其他/系统构建.md
+  h_754d50daf215ac 1-91
+Other/其他/网络请求/GSON.md
+  h_754d50daf215ac 1-286
+Other/其他/网络请求/OkHttp.md
+  h_754d50daf215ac 1-317
+Other/其他/网络请求/Postman.md
+  h_754d50daf215ac 1-41
+Other/其他/网络请求/Retrofit.md
+  h_754d50daf215ac 1-304
+Other/其他/网络请求/libcurl.md
+  h_754d50daf215ac 1-105
+Other/其他/网络请求/计算机网络/传输层.md
+  h_754d50daf215ac 1-205
+Other/其他/网络请求/计算机网络/后期/补充问题.md
+  h_754d50daf215ac 1-159
+Other/其他/网络请求/计算机网络/应用层.md
+  h_754d50daf215ac 1-439
+Other/其他/网络请求/计算机网络/概述和其它.md
+  h_754d50daf215ac 1-116
+Other/其他/资源管理.md
+  h_754d50daf215ac 1-242
+Other/第一行代码/记录写有用的东西.md
+  h_754d50daf215ac 1-252
+README.md
+  h_754d50daf215ac 1-6
+"UI 组件/RecyclerView.md"
+  h_754d50daf215ac 6-8,11-13,16-19,21-28,31-33,37-38,41-42,45,48-51,54,57-61,65-133,137-140,146-149,151,153-159,161-162,164,166,168-185,187-214,216-299,301-302,304,306-321,326,328,330-333,336-372,375,378-423,426-447,450-497,500-567,570,572,574-576,578-582,584-602,604-619,621-694,697,700-759,761-800
+开发工具/Android/Perfetto.md
+  h_754d50daf215ac 1-8
+测试框架与工具/README.md
+  h_754d50daf215ac 1
+"测试框架与工具/UI 测试/Espresso.md"
+  h_754d50daf215ac 1-238
+"测试框架与工具/UI 测试/UI Automator.md"
+  h_754d50daf215ac 1-160
+"测试框架与工具/单元测试/JUnit 4.md"
+  h_754d50daf215ac 523-617
+测试框架与工具/单元测试/Robolectric.md
+  h_754d50daf215ac 1-418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b40eca68a8e529e771a09c0eef4875755ca7efc",
+  "prompts": {},
+  "humans": {
+    "h_754d50daf215ac": {
+      "author": "sjma67 <sichao_yan@saic-gm.com>"
+    }
+  }
+}
