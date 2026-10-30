@@ -1,0 +1,42 @@
+Kotlin/Kotlin.md
+  h_754d50daf215ac 140,142
+"书籍阅读/Android开发艺术探索/02 IPC机制.md"
+  h_754d50daf215ac 7,9-11,13-15,17-20,22,24,26,28-31,33,35-54,56,58,85,110,123,224,238-241,262,264,276,309,311,313-426,429-446,464-472,486-487,505,531,553,555
+开发工具/Android/ABD.md
+  h_754d50daf215ac 5,30-32
+异步编程/RxJava/RxJava.md
+  h_754d50daf215ac 1-4,27
+异步编程/RxJava/面试.md
+  h_754d50daf215ac 1-4,15,478
+网络请求/GSON.md
+  h_754d50daf215ac 1-4
+网络请求/OkHttp.md
+  h_754d50daf215ac 1-4
+网络请求/Postman.md
+  h_754d50daf215ac 2,11,36
+网络请求/Retrofit.md
+  h_754d50daf215ac 1-4
+网络请求/libcurl.md
+  h_754d50daf215ac 1-4
+网络请求/计算机网络/传输层.md
+  h_754d50daf215ac 1-4,9,41,75,93,121,129
+网络请求/计算机网络/后期/补充问题.md
+  h_754d50daf215ac 1-4,57,121,123,135,137,163
+网络请求/计算机网络/应用层.md
+  h_754d50daf215ac 1-4,15,130,134,157,159,161
+网络请求/计算机网络/概述和其它.md
+  h_754d50daf215ac 1-4,15,29,37,65
+资源管理/README.md
+  h_754d50daf215ac 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e8188cf1fb7f685ed47b361528dc90e3133a01fe",
+  "prompts": {},
+  "humans": {
+    "h_754d50daf215ac": {
+      "author": "sjma67 <sichao_yan@saic-gm.com>"
+    }
+  }
+}
