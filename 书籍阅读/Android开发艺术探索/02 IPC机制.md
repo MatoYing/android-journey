@@ -470,7 +470,7 @@ protected User(Parcel in) {
 
 Parcel 是 Android 系统库的类，它是由 BootClassLoader 加载的，你如果调用 `in.readParcelable(null)` 系统默认会使用 BootClassLoader 去尝试寻找类，这样就会找不到。
 
-### Binder
+### mmap
 
 ###### 内存映射（mmap）
 
@@ -536,17 +536,22 @@ void* mapped = mmap(NULL, 1016 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
 
 + 执行实现：内核发现 Binder 驱动在这个结构体里注册了 `.mmap = binder_mmap`，于是就跳转到 Binder 驱动内部执行 binder_mmap 函数。
 
----
-
-什么是驱动？
+###### 什么是驱动？
 
 上面提到的 `/dev/binder` 就是一个驱动程序（准确地说是驱动程序在用户空间的一个“入口”）。驱动程序（Device Driver）是连接操作系统内核与设备之间的“翻译官”。它的作用是，对于硬件（如硬盘、显卡、键盘）只懂电信号和寄存器指令；对于应用程序（如微信、游戏）只懂高级语言指令，驱动就是负责把应用程序的请求转换成硬件能懂的操作，反之亦然。比如 `/dev/tty` 串口、`/dev/fb0` 显卡。
 
 通常驱动是为了操控硬件，但 Binder 是一个“虚拟设备驱动”，它没有对应的实体硬件。Android 把它写成驱动，主要是为了合法”进入内核空间（驱动程序运行在系统的内核空间，拥有最高权限，可以操作内存、硬件和 CPU 核心；普通的 App 运行在用户空间，不能直接碰硬件）。进程 A 无法直接访问进程 B 的内存，是 Linux 的安全机制，为了进程隔离。要打破这种隔离，必须找一个“中间人”。这个中间人必须有权限访问所有进程的内存。在系统中，只有内核有这个权限。所以把 Binder 写成驱动，就能名正言顺地运行在内核空间，帮两个进程搬运数据。
 
----
+###### binder_mmap 和常说的磁盘文件系统的 mmap 有什么区别呢？
 
-binder_mmap 和常说的磁盘文件系统的 mmap 有什么区别呢？比如从进程 A 发送数据到进程 B，三种方式的过程：
+前提，先明确：
+
++ 一个进程空间分为用户空间、内核空间（Kernel），即把进程内用户和内核隔离开来。
++ 所有进程共用 1 个内核空间。
++ 进程间，用户空间的数据不可共享，所以用户空间 = 不可共享空间。
++ 进程间，内核空间的数据可共享，所以内核空间 = 可共享空间。
+
+比如从进程 A 发送数据到进程 B，三种方式的过程：
 
 1）传统 IPC 方式（如 Socket、管道、消息队列）（核心逻辑：内核作为中转站，数据在用户态和内核态之间搬运两次）
 
@@ -584,47 +589,218 @@ binder_mmap 和常说的磁盘文件系统的 mmap 有什么区别呢？比如�
 
 + Binder mmap：虚拟内存 $\rightarrow$ 物理内存 $\rightarrow$ 没了（纯内存，没有磁盘文件）。
 
-
-
----
-
-为什么不直接用共享内存的方式？这样不就实现 0 次拷贝吗？
+###### 为什么不直接用共享内存的方式？这样不就实现 0 次拷贝吗？
 
 最大的问题是安全性上，如果两个进程共享一块内存且都有写权限，一个进程崩溃或恶意修改数据，可能会直接导致另一个进程也挂掉。而 mmap 这种方式，接收方是只读的。
 
+### Binder
 
+> https://blog.csdn.net/carson_ho/article/details/73560642
 
-- 1. 进程间，用户空间的数据不可共享，所以用户空间 = 不可共享空间
-  2. 进程间，内核空间的数据可共享，所以内核空间 = 可共享空间
-
-
-
-
-
-
-
-
-
-
-
-![image-20260608002818763](/Users/mato/Library/Application Support/typora-user-images/image-20260608002818763.png)
-
-
-
-
-
-
-
-
-
-
+![image-20261101202353499](../../assets/image-20261101202353499.png)
 
 Binder 通信涉及四个核心角色：
 
-+ Client（客户端）：服务的请求方（如你的 App）。
-+ Server（服务端）：服务的提供方（如系统服务 ActivityManagerService）。
-+ Service Manager（目录服务）：管理所有的实名 Server。Server 需要先在它这里“注册”，Client 才能根据名字“查询”到 Server。类似于路由器。
-+ Binder Driver（驱动）：是运行在 Android 内核空间的一种虚拟设备驱动，充当了 Client 进程、Server 进程和 Service Manager 之间跨进程通信的桥梁。在底层，它通过 mmap 技术在内核空间中创建接收缓存区并进行地址映射，实现了高效的“一次数据拷贝”。同时，Binder 驱动负责持有每个 Server 进程在内核中的 Binder 实体，并向 Client 进程分发对应的 Binder 引用。整个通信过程中的线程控制，则由 Binder 驱动自身动态管理的 Binder 线程池来统一调度和实现。
++ Client（客户端）：发起远程调用的一方。通过 Binder 引用向服务端发送请求。
++ Server（服务端）：提供服务并处理请求的一方，通常把 Binder 对象注册出去。
++ ServiceManager：管理系统服务的注册与查询。客户端可以按服务名查询，获得对应的 Binder 引用。它本身也是一个特殊的 Binder 服务。
++ Binder 驱动：内核中的通信机制，负责传递事务数据、管理 Binder 对象引用，并把请求分发到目标进程。
+
+典型流程是：
+
+1. 服务端创建 Binder 服务，并向 ServiceManager 注册。
+2. 客户端向 ServiceManager 查询服务，获得 Binder 引用。
+3. 客户端通过该引用发起调用；请求经 Binder 驱动送到服务端。
+4. 服务端处理请求，再通过驱动把结果返回给客户端。
+
+![image-20261101171121222](../../assets/image-20261101171121222.png)
+
+用一个例子进行演示，客户端调用远程 Service，让它计算两个整数的和。
+
+1）服务端：实现 Binder
+
+```java
+public class CalcService extends Service {
+    // 接口描述符（Descriptor），客户端与服务端通过它校验接口身份
+    // 一个Service可以对外提供多个Binder接口，每个接口通常都有自己的DESCRIPTOR，以避免将其他接口的请求按当前接口协议处理；同一个接口的多个方法共用一个DESCRIPTOR，靠事务码区分方法
+    private static final String DESCRIPTOR = "com.example.app.ICalc";
+    
+    // 自定义业务方法的transaction code，从IBinder.FIRST_CALL_TRANSACTION（值为1）开始分配
+    private static final int TRANSACTION_ADD = IBinder.FIRST_CALL_TRANSACTION;
+
+    // 匿名内部类实现Binder，作为Service的通信端点
+    private final IBinder binder = new Binder() {
+        /**
+         * 处理客户端发来的IPC请求
+         * code：事务码；data：输入参数；reply：返回值；flags：调用标记（0，有返回值；FLAG_ONEWAY，不会有返回值，reply会被忽略）
+         */
+        @Override
+        public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            // 处理Binder协议层的"查询接口描述符"请求。
+            // 当底层框架、Native代码或调试工具调用getInterfaceDescriptor()时，会发送接口描述符，供查询方确认接口身份
+            if (code == IBinder.INTERFACE_TRANSACTION) {
+                reply.writeString(DESCRIPTOR);
+                return true;
+            }  
+          
+            // 处理自定义的add方法调用
+            if (code == TRANSACTION_ADD) {
+                // 校验接口描述符，确保data是发给本接口的Parcel
+                data.enforceInterface(DESCRIPTOR);
+
+                // 从Parcel中读取参数
+                int a = data.readInt();
+                int b = data.readInt();
+
+                // 写入"无异常"标记，然后写入计算结果
+                reply.writeNoException();
+                reply.writeInt(a + b);
+                return true; // 返回true表示已成功处理该code
+            }
+
+            // 未识别的code，交给父类处理（通常会返回false，触发客户端异常）
+            return super.onTransact(code, data, reply, flags);
+        }
+    };
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        // 将Binder实例返回给客户端，客户端通过它发起IPC
+        return binder;
+    }
+}
+```
+
+2）Manifest：让 Service 在独立进程运行
+
+如果不设置 `android:process`，Service 默认与客户端处于同一进程；这时拿到的是本地 Binder 调用，不会经过真正的跨进程传输。
+
+```xml
+<service
+    android:name=".CalcService"
+    android:process=":remote"
+    android:exported="false" />
+```
+
+3）客户端：绑定服务并发送事务
+
+```java
+public class CalcClient {
+    private IBinder remoteBinder;
+    private final Context context;
+
+    // 用于在后台线程执行IPC调用，避免阻塞主线程
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    public CalcClient(Context context) {
+        this.context = context.getApplicationContext();
+    }
+
+    // ServiceConnection监听绑定状态
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            remoteBinder = service;
+            // 连接成功后，触发真正的调用
+            doAdd(1, 2);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            remoteBinder = null;
+        }
+    };
+
+    // 绑定服务
+    public void bind() {
+        // 如果不是一个工程，通过"com.example.remoteapp.CalcService"+setPackage()的方式
+        Intent intent = new Intent(context, CalcService.class);
+        context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+    }
+
+    // 解绑服务，防止内存泄漏
+    public void unbind() {
+        if (remoteBinder != null) {
+            context.unbindService(connection);
+            remoteBinder = null;
+        }
+        executor.shutdown();
+    }
+
+    // ============================================
+    // 真正调用：在工作线程中执行IPC
+    // ============================================
+    public void doAdd(int a, int b) {
+        if (remoteBinder == null) {
+            Log.w("CalcClient", "Binder 尚未连接");
+            return;
+        }
+        // transact()是同步阻塞调用，严禁在主线程执行
+        executor.execute(() -> {
+            try {
+                int result = add(a, b);
+                Log.d("CalcClient", a + " + " + b + " = " + result);
+            } catch (RemoteException e) {
+                Log.e("CalcClient", "IPC 调用失败", e);
+            }
+        });
+    }
+
+    // 底层IPC调用封装
+    private int add(int a, int b) throws RemoteException {
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+
+        try {
+            // 写入接口Token，对应服务端enforceInterface()的校验
+            data.writeInterfaceToken("com.example.app.ICalc");
+            data.writeInt(a);
+            data.writeInt(b);
+
+            // 发送事务码TRANSACTION_ADD，同步等待服务端返回
+            boolean handled = remoteBinder.transact(IBinder.FIRST_CALL_TRANSACTION, data, reply, 0);
+            if (!handled) {
+                throw new RemoteException("Unknown transaction");
+            }
+
+            // 读取服务端写入的异常信息（writeNoException/writeException）
+            reply.readException();
+            // 读取返回值
+            return reply.readInt();
+        } finally {
+            reply.recycle();
+            data.recycle();
+        }
+    }
+}
+```
+
+4）在 Activity 中使用（完整生命周期示例）
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private CalcClient calcClient;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        
+        calcClient = new CalcClient(this);
+        calcClient.bind(); // 开始绑定
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        calcClient.unbind(); // 解绑，释放资源
+    }
+}
+```
+
+
+
+> 当接口方法或参数类型增多后，手写 `onTransact` / `transact` 很容易出错，且维护成本极高。**AIDL 的价值正是自动生成这套 Stub/Proxy 模板代码**，让你专注于业务逻辑而非 IPC 协议细节。
 
 
 
@@ -654,25 +830,123 @@ Binder 通信涉及四个核心角色：
 
 
 
-这 个 S t u b 就 是 一 个 B i n d e r 类 ， 当 客 户 端 和 服 务 端 都 位 于 同 一 个进 程 时， 方 法 调 用 不 会 走 跨 进 程 的 t r a n s a c t 过 程 ，而当两者位于不同进程时，方法调用需要走transact 过程，这个逻辑由Stub 的内部代理 类Proxy来完成。
 
 
 
-asInterface：用于将服务端的Binder 对象转换成客户端所需的AIDL 接又类型的对象，这种转换过 程是区分进程的，如果客户端和服务端位于同一进程，那么此方法返回的就是服务端的Stub 对 象 本 身 ， 否 则 返回 的 是 系 统 封 装 后 的 S t u b , p r o x y 对 象 。
 
 
 
- 当 客 户 端 发 起 远 程 请 求 时 ， 由于 当 前 线 程 会 被 挂 起 直 至 服 务 端 进 程 返 回数据，所以如果一个远程方法是很耗时的，那么不能在UI线程中发起此远程请求; 其次， 由于服务端的Binder 方法运行在Binder 的线程池中，所以Binder 方法不管是否耗时都应 该采 用 同 步 的 方 式 去 实 现 ， 因 为 它 已 经 运 行 在 一 个 线 程 中 了
-
-![image-20260524182033745](/Users/mato/Library/Application Support/typora-user-images/image-20260524182033745.png)
 
 
 
-从上述分析过程来看，我们完全可以不提供AIDL 文件即可实现Binder，之所以提供 AIDL 文件，是为了方便系统为我们生成代码。系统根据AIDL文件生成Java文件的格式 是固定的，我们可以抛开AIDL 文件直接写一个Binder出来，接下来我们就介绍如何手动 写一个Binder
 
 
 
-AIDL 文 件 并 不 是 实 现 B i n d e r 的 必 需 品 。 是 否 手 动实 现 B i n d e r 没有本质区别，二者的工作原理完全 一样，AIDL 文件的本质是系统为我们提供了一种快速实现 B i n d e r 的 工 具 ， 仅 此 而已 。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1）声明接口
+
+新建 `app/src/main/aidl/com/example/app/ICalc.aidl`：
+
+```java
+package com.example.app;
+
+interface ICalc {
+    int add(int a, int b);
+}
+```
+
+AIDL 文件的包名和目录要对应。构建后会生成 `ICalc` 接口及其 `Stub`、`Proxy` 等代码。
+
+2）服务端实现接口
+
+```java
+public class CalcService extends Service {
+    private final ICalc.Stub binder = new ICalc.Stub() {
+        @Override
+        public int add(int a, int b) {
+            return a + b;
+        }
+    };
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return binder;
+    }
+}
+```
+
+在 `AndroidManifest.xml` 中注册服务，并让它运行在另一个进程：
+
+```xml
+<service
+    android:name=".CalcService"
+    android:process=":remote"
+    android:exported="false" />
+```
+
+3）客户端绑定并调用
+
+```java
+private ICalc calc;
+
+private final ServiceConnection connection = new ServiceConnection() {
+    @Override
+    public void onServiceConnected(ComponentName name, IBinder service) {
+        calc = ICalc.Stub.asInterface(service);
+    }
+
+    @Override
+    public void onServiceDisconnected(ComponentName name) {
+        calc = null;
+    }
+};
+
+private void bindCalcService() {
+    Intent intent = new Intent(this, CalcService.class);
+    bindService(intent, connection, Context.BIND_AUTO_CREATE);
+}
+```
+
+连接成功后，在**工作线程**中调用：
+
+```java
+try {
+    int result = calc.add(1, 2);
+} catch (RemoteException e) {
+    // 处理远程调用失败
+}
+```
+
+`bindService()` 成功后要在适当时机调用 `unbindService(connection)`。
+
+和手写 Binder 相比，关键差别是：你只声明 `ICalc.aidl` 并实现 `ICalc.Stub`；参数的 `Parcel` 编解码、事务码和客户端代理由 AIDL 生成。跨进程调用仍然走 Binder。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -726,11 +1000,242 @@ AIDL 文 件 并 不 是 实 现 B i n d e r 的 必 需 品 。 是 否 手 动
 
 ### 使用 AIDL
 
+重点是服务端自己处理 `onTransact()`，客户端自己用 `Parcel` 打包参数并调用 `transact()`——这就是不使用 AIDL 时需要手写的部分。
+
+
+
+下面是使用 **AIDL** 方式实现的完整版本。AIDL 的核心价值就是**自动生成 `Stub/Proxy`，让你不用再手写 `onTransact` 和 `transact`**。
+
+
+
+
+
+1）AIDL 接口定义
+
+文件路径：`app/src/main/aidl/com/example/app/ICalc.aidl`
+
+```java
+// ICalc.aidl
+package com.example.app;
+
+interface ICalc {
+    int add(int a, int b);
+}
+```
+
+编译后，AIDL 工具会自动生成 `ICalc.java`，包含：
+- `ICalc` 接口（定义方法）
+- `ICalc.Stub`（抽象类，服务端继承它）
+- `ICalc.Stub.Proxy`（内部类，客户端代理，AIDL 自动生成）
+
+2）服务端：继承 Stub
+
+```java
+public class CalcService extends Service {
+    
+    // 创建Stub实例（内部已经处理好了onTransact、DESCRIPTOR、INTERFACE_TRANSACTION等）
+    private final ICalc.Stub binder = new ICalc.Stub() {
+        @Override
+        public int add(int a, int b) throws RemoteException {
+            // 直接实现业务逻辑，不用关心Parcel、transact、code等底层细节
+            return a + b;
+        }
+    };
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return binder; // 返回Stub实例给客户端
+    }
+}
+```
+
+对比原生 Binder 的手写：省去了 `onTransact()`、`DESCRIPTOR`、`TRANSACTION_ADD`、`enforceInterface()`、`writeNoException()` 等所有模板代码。
+
+3）客户端：使用 asInterface
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private ICalc calcService;  // AIDL生成的接口
+    private ServiceConnection connection;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        connection = new ServiceConnection() {
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder service) {
+                // 关键：asInterface自动判断本地还是远程
+                calcService = ICalc.Stub.asInterface(service);
+                
+                // 在后台线程执行 IPC（transact 是同步阻塞的）
+                new Thread(() -> {
+                    try {
+                        int result = calcService.add(1, 2);
+                        Log.d("AIDL", "1 + 2 = " + result);
+                    } catch (RemoteException e) {
+                        Log.e("AIDL", "调用失败", e);
+                    }
+                }).start();
+            }
+
+            @Override
+            public void onServiceDisconnected(ComponentName name) {
+                calcService = null;
+            }
+        };
+
+        // 绑定远程Service
+        Intent intent = new Intent(this, CalcService.class);
+        bindService(intent, connection, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unbindService(connection);
+    }
+}
+```
+
+对比原生 Binder 的手写：省去了 `Parcel.obtain()`、`writeInterfaceToken()`、`transact()`、`readException()`、`readInt()`、`recycle()` 等。
+
+4）Manifest 配置
+
+```xml
+<service
+    android:name=".CalcService"
+    android:process=":remote"
+    android:exported="false" />
+```
+
+5）AIDL 自动生成的核心代码（了解即可）
+
+AIDL 工具生成的 `ICalc.java` 大致长这样（简化版）：
+
+```java
+public interface ICalc extends android.os.IInterface {
+    
+    public int add(int a, int b) throws android.os.RemoteException;
+    
+    // ========== Stub：服务端继承 ==========
+    public static abstract class Stub extends android.os.Binder implements ICalc {
+        public static final String DESCRIPTOR = "com.example.app.ICalc";
+        public static final int TRANSACTION_add = IBinder.FIRST_CALL_TRANSACTION + 0;
+        
+        public Stub() {
+            this.attachInterface(this, DESCRIPTOR); // 注册到 Binder 框架
+        }
+        
+        @Override
+        public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            switch (code) {
+                case INTERFACE_TRANSACTION:
+                    reply.writeString(DESCRIPTOR);
+                    return true;
+                    
+                case TRANSACTION_add:
+                    data.enforceInterface(DESCRIPTOR);
+                    int _arg0 = data.readInt();
+                    int _arg1 = data.readInt();
+                    int _result = this.add(_arg0, _arg1); // 调用本地实现
+                    reply.writeNoException();
+                    reply.writeInt(_result);
+                    return true;
+            }
+            return super.onTransact(code, data, reply, flags);
+        }
+        
+        // ========== Proxy：客户端代理 ==========
+        private static class Proxy implements ICalc {
+            private final IBinder mRemote;
+            
+            Proxy(IBinder remote) {
+                mRemote = remote;
+            }
+            
+            @Override
+            public int add(int a, int b) throws RemoteException {
+                Parcel _data = Parcel.obtain();
+                Parcel _reply = Parcel.obtain();
+                try {
+                    _data.writeInterfaceToken(DESCRIPTOR);
+                    _data.writeInt(a);
+                    _data.writeInt(b);
+                    mRemote.transact(Stub.TRANSACTION_add, _data, _reply, 0);
+                    _reply.readException();
+                    return _reply.readInt();
+                } finally {
+                    _reply.recycle();
+                    _data.recycle();
+                }
+            }
+        }
+        
+        // asInterface：自动判断本地/远程
+        public static ICalc asInterface(IBinder obj) {
+            if (obj == null) return null;
+            IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
+            if (iin != null && iin instanceof ICalc) {
+                return (ICalc) iin; // 本地直接调用
+            }
+            return new Proxy(obj);      // 远程走 IPC
+        }
+    }
+}
+```
+
+---
+
+## 6. 手写 vs AIDL 对比
+
+| 维度                 | 手写 Binder                             | AIDL                   |
+| -------------------- | --------------------------------------- | ---------------------- |
+| **代码量**           | 多（手动处理 Parcel、code、transact）   | 少（只写业务逻辑）     |
+| **DESCRIPTOR**       | 手动定义                                | AIDL 自动生成          |
+| **TRANSACTION 编号** | 手动分配                                | AIDL 自动分配          |
+| **onTransact**       | 手写 switch/if                          | AIDL 自动生成          |
+| **Parcel 读写**      | 手写                                    | AIDL 自动生成          |
+| **异常处理**         | 手写 `writeNoException`/`readException` | AIDL 自动生成          |
+| **本地/远程优化**    | 手动实现                                | `asInterface` 自动判断 |
+| **维护成本**         | 高（接口变更需改多处）                  | 低（改 AIDL 文件即可） |
+
+---
+
+## 7. 一句话总结
+
+> **AIDL 的本质就是一个代码生成器**：你定义接口，AIDL 自动帮你生成 `Stub`（服务端模板）和 `Proxy`（客户端代理），屏蔽了所有 `Parcel` 序列化、`transact` IPC、`DESCRIPTOR` 校验等底层细节。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ### 使用 ContentProvider
 
 ### 使用 Socket
 
-## Binder 连接迟
+## Binder 连接池
 
 ## 选用合适的 IPC 方式
 
