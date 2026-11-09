@@ -613,11 +613,53 @@ Binder 通信涉及四个核心角色：
 3. 客户端通过该引用发起调用；请求经 Binder 驱动送到服务端。
 4. 服务端处理请求，再通过驱动把结果返回给客户端。
 
-![image-20261101171121222](../../assets/image-20261101171121222.png)
+```mermaid
+sequenceDiagram
+    participant S as Server (Stub)
+    participant D as Binder Driver (/dev/binder)
+    participant SM as ServiceManager
+    participant C as Client (Proxy)
+
+    Note over S, SM: 阶段一：服务注册
+    S->>D: addService("name", binder_ref)
+    D->>SM: 转发请求 (内核拷贝)
+    SM-->>D: 确认注册成功
+    D-->>S: 返回结果
+
+    Note over C, SM: 阶段二：服务发现
+    C->>D: getService("name")
+    D->>SM: 转发查询请求
+    SM-->>D: 返回对应的 IBinder 引用
+    D-->>C: 获取到 Proxy 对象
+
+    Note over C, S: 阶段三：跨进程调用
+    C->>D: transact(code, data)
+    D->>S: 唤醒并传递数据 (一次拷贝)
+    S->>S: onTransact() 处理业务逻辑
+    S-->>D: 返回结果 (reply)
+    D-->>C: 收到响应
+```
 
 用一个例子进行演示，客户端调用远程 Service，让它计算两个整数的和。
 
 1）服务端：实现 Binder
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.app">
+    
+    <application>
+        <service
+            android:name=".CalcService"
+            android:exported="true">  <!-- 允许其他App调用 -->
+            <!-- 可选：声明intent-filter，支持隐式调用 -->
+            <intent-filter>
+                <action android:name="com.example.app.ICalc" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
+```
 
 ```java
 public class CalcService extends Service {
@@ -798,217 +840,153 @@ public class MainActivity extends AppCompatActivity {
 }
 ```
 
-
-
-> 当接口方法或参数类型增多后，手写 `onTransact` / `transact` 很容易出错，且维护成本极高。**AIDL 的价值正是自动生成这套 Stub/Proxy 模板代码**，让你专注于业务逻辑而非 IPC 协议细节。
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-1）声明接口
-
-新建 `app/src/main/aidl/com/example/app/ICalc.aidl`：
-
-```java
-package com.example.app;
-
-interface ICalc {
-    int add(int a, int b);
-}
-```
-
-AIDL 文件的包名和目录要对应。构建后会生成 `ICalc` 接口及其 `Stub`、`Proxy` 等代码。
-
-2）服务端实现接口
-
-```java
-public class CalcService extends Service {
-    private final ICalc.Stub binder = new ICalc.Stub() {
-        @Override
-        public int add(int a, int b) {
-            return a + b;
-        }
-    };
-
-    @Override
-    public IBinder onBind(Intent intent) {
-        return binder;
-    }
-}
-```
-
-在 `AndroidManifest.xml` 中注册服务，并让它运行在另一个进程：
-
-```xml
-<service
-    android:name=".CalcService"
-    android:process=":remote"
-    android:exported="false" />
-```
-
-3）客户端绑定并调用
-
-```java
-private ICalc calc;
-
-private final ServiceConnection connection = new ServiceConnection() {
-    @Override
-    public void onServiceConnected(ComponentName name, IBinder service) {
-        calc = ICalc.Stub.asInterface(service);
-    }
-
-    @Override
-    public void onServiceDisconnected(ComponentName name) {
-        calc = null;
-    }
-};
-
-private void bindCalcService() {
-    Intent intent = new Intent(this, CalcService.class);
-    bindService(intent, connection, Context.BIND_AUTO_CREATE);
-}
-```
-
-连接成功后，在**工作线程**中调用：
-
-```java
-try {
-    int result = calc.add(1, 2);
-} catch (RemoteException e) {
-    // 处理远程调用失败
-}
-```
-
-`bindService()` 成功后要在适当时机调用 `unbindService(connection)`。
-
-和手写 Binder 相比，关键差别是：你只声明 `ICalc.aidl` 并实现 `ICalc.Stub`；参数的 `Parcel` 编解码、事务码和客户端代理由 AIDL 生成。跨进程调用仍然走 Binder。
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Android中的 IPC 方式
 
 ### 使用 Bundle
 
-### 使用文件共享
+Bundle 是 Android 里的键值对容器，用来在组件之间传递数据。 本质上是 `Map<String, Object>` 的封装，但针对 Android 场景做了优化。
+
+支持的类型：
+
+```java
+// 基本类型
+bundle.putInt("key", 123);
+bundle.putString("name", "value");
+bundle.putBoolean("flag", true);
+bundle.putLong("timestamp", System.currentTimeMillis());
+
+// 复杂类型
+bundle.putParcelable("user", userObject);  // 实现Parcelable的对象
+bundle.putSerializable("data", serializableObj);  // 实现Serializable的对象
+bundle.putIntArray("ids", new int[]{1,2,3});
+bundle.putStringArrayList("names", list);
+```
+
+常见用途：
+
+1）Activity/Fragment 间通信
+
+```java
+// 发送方
+Intent intent = new Intent(this, TargetActivity.class);
+Bundle bundle = new Bundle();
+bundle.putString("username", "John");
+bundle.putInt("age", 25);
+intent.putExtras(bundle);
+startActivity(intent);
+
+// 接收方
+Bundle bundle = getIntent().getExtras();
+if (bundle != null) {
+    String name = bundle.getString("username");
+    int age = bundle.getInt("age");
+}
+```
+
+2）Fragment 参数传递
+
+```java
+// 创建Fragment时传参
+MyFragment fragment = new MyFragment();
+Bundle args = new Bundle();
+args.putString("title", "首页");
+fragment.setArguments(args);
+
+// Fragment内部获取
+String title = getArguments().getString("title");
+```
+
+3）状态保存
+
+```java
+@Override
+protected void onSaveInstanceState(Bundle outState) {
+    super.onSaveInstanceState(outState);
+    outState.putString("saved_text", editText.getText().toString());
+}
+
+@Override
+protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    if (savedInstanceState != null) {
+        String text = savedInstanceState.getString("saved_text");
+    }
+}
+```
+
+Bundle 本质上就是一个 Map，内部使用 `ArrayMap<String, Object>`。那为什么不直接用 HashMap 呢？
+
++ HashMap 实现了 Java 标准的 Serializable 接口，所以处理序列化时会高度依赖反射；而 Bundle 是基于 Parcelable 里效率远高于 Serializable。虽然 Bundle 可以包含 Serializable 对象，但这些对象会被转成 byte[] 存储，传输时作为二进制流直接透传，不经过反序列化。
++ Bundle 的延迟解析是它能跨进程传递自定义类的关键。Intent 从组件 A 传递到组件 B 时，会经过 system_server（AMS/ATMS）中转，但系统进程并不需要、也无法解析 Bundle 中的自定义对象。实际上，Bundle 的内容始终以原始 Parcel 字节的形式被系统进程透传，系统进程全程不触发任何反序列化操作。直到组件 B 调用 `getParcelableExtra()` 等方法实际读取某个键时，才由 B 所在进程的 ClassLoader 完成反序列化，这就天然规避了系统进程缺少自定义类的问题。
++ ArrayMap（Android 专供），用两个紧凑数组（一个 int[] 存哈希值、一个 Object[] 交替存键值对）替代了 HashMap 的 Node 链表/红黑树结构，以牺牲插入删除性能为代价换取更低的内存占用，适合小数据量场景。
++ 可以限制值的类型，`Map<String, Object>` 可以放入任何对象，包括 View、Context 这类无法序列化的对象，问题要到运行时才会暴露。Bundle 只提供 `putInt()`、`putString()`、`putParcelable()` 等方法，从接口上限制只能放可序列化的数据。
+
+另外它和 intent 什么关系？
+
+- Intent 负责路由：系统根据 component、action、category 等信息找到目标组件。
+- Bundle 负责携带数据，Intent 包含 Bundle。
+
+```java
+public class Intent implements Parcelable {
+    private String mAction;          // 要做什么，例如ACTION_VIEW
+    private Uri mData;               // 操作的对象
+    private ComponentName mComponent;// 发给哪个组件
+    private ArraySet<String> mCategories;
+    private int mFlags;
+    private Bundle mExtras;          // 附带数据
+}
+```
+
+```java
+Intent intent = new Intent();
+intent.putExtra("id", 1);          // 懒初始化Bundle（mExtras），mExtras.putInt("id", 1)
+intent.putExtras(bundle);          // 将传入Bundle的全部键值合并到mExtras
+intent.getIntExtra("id", 0);       // mExtras.getInt("id", 0)
+```
+
+### 使用文件共享（无用）
+
+两个进程通过读写同一个文件来交换数据，这个显然多进程下是不可靠的。
+
+```java
+// 进程A：把数据写到文件
+File file = new File("/sdcard/data.txt");
+FileWriter writer = new FileWriter(file);
+writer.write("你好，这是进程A的数据");  // 写
+writer.close();
+
+// 进程B：从文件读取数据
+FileReader reader = new FileReader(file);
+// 读 → 得到 "你好，这是进程A的数据"
+reader.close();
+```
+
+SharedPreferences 和上面本质上同理，只不过加了内存缓存机制，但仍然是不可靠的。
 
 ### 使用 Messenger（过时）
 
+Messenger 是 Android 提供的一种跨进程通信（IPC）机制，基于 Handler 和 Message 实现，它是 AIDL 的简化替代方案。现在用的很少，原因如下：
+
+- 难以支持同步调用：它本质上是单向异步消息机制。虽然可以在客户端通过 `msg.replyTo = clientMessenger` 让服务端回复，但这属于“发消息-等回调”，无法像普通方法调用那样直接 `int result = service.calculate()` 同步拿返回值。
+- 串行处理有性能瓶颈：Messenger 内部是单线程排队。如果客户端短时间内发送大量 IPC 请求，或者服务端在处理某一条消息时耗时较长，后续的所有消息都会被阻塞堆积，吞吐量极低，无法利用多核 CPU 的并发能力。
+- 可读性极差，难以维护：数据全部只能硬编码塞进 `msg.what`、`msg.arg1`、`msg.arg2` 或者 `msg.setData(Bundle)` 里面。业务复杂时，代码里充斥着大量的 `switch(msg.what)` 和拆解 Bundle，根本无法做接口抽象与编译期类型约束。
+
 ### 使用 AIDL
 
-重点是服务端自己处理 `onTransact()`，客户端自己用 `Parcel` 打包参数并调用 `transact()`——这就是不使用 AIDL 时需要手写的部分。
+AIDL 的本质就是一个代码生成器：你定义接口，AIDL 在编译时自动帮你生成 Stub（服务端模板）和 Proxy（客户端代理），功能上和手写 Binder 完全一样，只是省去了样板代码。
 
-
-
-下面是使用 **AIDL** 方式实现的完整版本。AIDL 的核心价值就是**自动生成 `Stub/Proxy`，让你不用再手写 `onTransact` 和 `transact`**。
-
-
-
-
+| 要做的事               | 手写 Binder                                                | AIDL                               |
+| ---------------------- | ---------------------------------------------------------- | ---------------------------------- |
+| 定义接口               | 手写 Java 接口，继承 `IInterface`                          | 写 `.aidl` 文件，声明方法即可      |
+| 接口标识 DESCRIPTOR    | 手动定义字符串常量                                         | 自动生成（包名 + 接口名）          |
+| 方法编号               | 手动定义 `TRANSACTION_xxx` 常量，两端必须一致              | 自动生成并保证一致                 |
+| 服务端 Stub            | 手写 `Binder` 子类，在 `onTransact()` 里用 switch 分发方法 | 自动生成，只需实现业务方法         |
+| 客户端 Proxy           | 手写代理类，每个方法都要调用 `transact()`                  | 自动生成                           |
+| 参数序列化             | 手动按顺序 `writeXxx()`，另一端按相同顺序 `readXxx()`      | 自动生成，写入和读取的顺序一定匹配 |
+| `in`/`out`/`inout`方向 | 自己决定参数要不要回写                                     | 用关键字声明，自动处理回写         |
+| 异常传递               | 手动 `writeNoException()` / `readException()`              | 自动处理                           |
+| `asInterface()`        | 同进程返回本地对象，跨进程返回 Proxy                       | 自动生成                           |
+| 单向调用               | 手动传 `FLAG_ONEWAY`                                       | 加 `oneway` 关键字                 |
 
 1）AIDL 接口定义
 
@@ -1028,12 +1006,12 @@ interface ICalc {
 - `ICalc.Stub`（抽象类，服务端继承它）
 - `ICalc.Stub.Proxy`（内部类，客户端代理，AIDL 自动生成）
 
-2）服务端：继承 Stub
+2）服务端：实现 Stub 的业务方法
 
 ```java
 public class CalcService extends Service {
     
-    // 创建Stub实例（内部已经处理好了onTransact、DESCRIPTOR、INTERFACE_TRANSACTION等）
+    // 创建Stub实例（使用AIDL的标准写法）
     private final ICalc.Stub binder = new ICalc.Stub() {
         @Override
         public int add(int a, int b) throws RemoteException {
@@ -1051,7 +1029,7 @@ public class CalcService extends Service {
 
 对比原生 Binder 的手写：省去了 `onTransact()`、`DESCRIPTOR`、`TRANSACTION_ADD`、`enforceInterface()`、`writeNoException()` 等所有模板代码。
 
-3）客户端：使用 asInterface
+3）客户端：使用 Proxy 调用远程方法
 
 ```java
 public class MainActivity extends AppCompatActivity {
@@ -1069,7 +1047,7 @@ public class MainActivity extends AppCompatActivity {
                 // 关键：asInterface自动判断本地还是远程
                 calcService = ICalc.Stub.asInterface(service);
                 
-                // 在后台线程执行 IPC（transact 是同步阻塞的）
+                // 在后台线程执行IPC（transact是同步阻塞的）
                 new Thread(() -> {
                     try {
                         int result = calcService.add(1, 2);
@@ -1125,7 +1103,7 @@ public interface ICalc extends android.os.IInterface {
         public static final int TRANSACTION_add = IBinder.FIRST_CALL_TRANSACTION + 0;
         
         public Stub() {
-            this.attachInterface(this, DESCRIPTOR); // 注册到 Binder 框架
+            this.attachInterface(this, DESCRIPTOR); // 注册到Binder框架
         }
         
         @Override
@@ -1180,32 +1158,13 @@ public interface ICalc extends android.os.IInterface {
             if (iin != null && iin instanceof ICalc) {
                 return (ICalc) iin; // 本地直接调用
             }
-            return new Proxy(obj);      // 远程走 IPC
+            return new Proxy(obj);      // 远程走IPC
         }
     }
 }
 ```
 
----
-
-## 6. 手写 vs AIDL 对比
-
-| 维度                 | 手写 Binder                             | AIDL                   |
-| -------------------- | --------------------------------------- | ---------------------- |
-| **代码量**           | 多（手动处理 Parcel、code、transact）   | 少（只写业务逻辑）     |
-| **DESCRIPTOR**       | 手动定义                                | AIDL 自动生成          |
-| **TRANSACTION 编号** | 手动分配                                | AIDL 自动分配          |
-| **onTransact**       | 手写 switch/if                          | AIDL 自动生成          |
-| **Parcel 读写**      | 手写                                    | AIDL 自动生成          |
-| **异常处理**         | 手写 `writeNoException`/`readException` | AIDL 自动生成          |
-| **本地/远程优化**    | 手动实现                                | `asInterface` 自动判断 |
-| **维护成本**         | 高（接口变更需改多处）                  | 低（改 AIDL 文件即可） |
-
----
-
-## 7. 一句话总结
-
-> **AIDL 的本质就是一个代码生成器**：你定义接口，AIDL 自动帮你生成 `Stub`（服务端模板）和 `Proxy`（客户端代理），屏蔽了所有 `Parcel` 序列化、`transact` IPC、`DESCRIPTOR` 校验等底层细节。
+#### 方向关键字（in/out/inout）
 
 
 
@@ -1223,7 +1182,9 @@ public interface ICalc extends android.os.IInterface {
 
 
 
+结果太大，超过 Binder 传输限制（约 1MB），例如大图或大量数据。
 
+**`linkToDeath/unlinkToDeath` 是 Binder 健壮性的基石。** 只要涉及跨进程调用，就必须通过它们来感知服务端存活状态，实现自动重连或优雅降级，至今仍是官方推荐的最佳实践。
 
 
 
@@ -1233,15 +1194,35 @@ public interface ICalc extends android.os.IInterface {
 
 ### 使用 ContentProvider
 
-### 使用 Socket
+ContentProvider 是系统预先定义好接口的 Binder 服务。AIDL 让你自己定义接口，ContentProvider 则把接口固定为增删改查，结构和 AIDL 生成的代码几乎一样。后文会详细介绍细节。
+
+### 使用 Socket（少见）
+
+同一设备上 Android 应用的 Java/Kotlin 代码之间通信，优先用 Binder 系方案（AIDL、Messenger、ContentProvider）；只有在**跨语言、跨设备、大数据流、协议受限**时才选 Socket。
+
+- 跨语言：对端是 C/C++ native 进程等非 Java 进程，常用 LocalSocket（Unix Domain Socket）。
+- 跨设备：Binder 只能用于本机进程间，手机与电脑、手机之间、手机与硬件设备之间只能走网络（TCP/UDP）。
+- 大数据流：Binder 缓冲区约 1MB，且由整个进程共享，只适合方法调用，不适合持续传输音视频或大文件。（本机进程之间传大数据，也可以考虑管道 ParcelFileDescriptor 或共享内存 SharedMemory）
+- 协议受限：需要自定义二进制协议，或对接已有 TCP 服务、移植跨平台通信代码。
+- 系统层：Zygote、adb、logd 都基于 Socket。
+
+（与 OkHttp 的关系：OkHttp 是基于 Socket 的 HTTP/WebSocket 客户端。它不能当服务端，也不支持自定义协议和 UDP，所以替代不了 Socket）
 
 ## Binder 连接池
+
+
 
 ## 选用合适的 IPC 方式
 
 
 
-
+| 场景           | 现代方案                                      | 优势                     |
+| :------------- | :-------------------------------------------- | :----------------------- |
+| 跨进程接口调用 | **AIDL**                                      | 类型安全、并发、语义清晰 |
+| 跨进程数据共享 | **ContentProvider**                           | 标准化、支持 CRUD        |
+| 事件通知       | **BroadcastReceiver / LocalBroadcastManager** | 一对多、解耦             |
+| 应用内通信     | **LiveData / Flow**                           | 响应式、生命周期感知     |
+| 简单数据传递   | **SharedPreferences / DataStore**             | 轻量、持久化             |
 
 
 
