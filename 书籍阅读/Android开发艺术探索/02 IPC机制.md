@@ -1094,45 +1094,56 @@ AIDL 工具生成的 `ICalc.java` 大致长这样（简化版）：
 
 ```java
 public interface ICalc extends android.os.IInterface {
-    
+
     public int add(int a, int b) throws android.os.RemoteException;
-    
+
     // ========== Stub：服务端继承 ==========
     public static abstract class Stub extends android.os.Binder implements ICalc {
         public static final String DESCRIPTOR = "com.example.app.ICalc";
         public static final int TRANSACTION_add = IBinder.FIRST_CALL_TRANSACTION + 0;
-        
+
         public Stub() {
-            this.attachInterface(this, DESCRIPTOR); // 注册到Binder框架
+            // 把这个 Stub 和描述符挂到当前 Binder 对象上，供本进程 queryLocalInterface 查找
+            this.attachInterface(this, DESCRIPTOR);
         }
-        
+
+        @Override
+        public IBinder asBinder() {
+            return this; // Stub 自己就是 Binder
+        }
+
         @Override
         public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             switch (code) {
                 case INTERFACE_TRANSACTION:
                     reply.writeString(DESCRIPTOR);
                     return true;
-                    
+
                 case TRANSACTION_add:
                     data.enforceInterface(DESCRIPTOR);
                     int _arg0 = data.readInt();
                     int _arg1 = data.readInt();
-                    int _result = this.add(_arg0, _arg1); // 调用本地实现
+                    int _result = this.add(_arg0, _arg1); // 调用子类写的实现
                     reply.writeNoException();
                     reply.writeInt(_result);
                     return true;
             }
             return super.onTransact(code, data, reply, flags);
         }
-        
+
         // ========== Proxy：客户端代理 ==========
         private static class Proxy implements ICalc {
             private final IBinder mRemote;
-            
+
             Proxy(IBinder remote) {
                 mRemote = remote;
             }
-            
+
+            @Override
+            public IBinder asBinder() {
+                return mRemote; // 返回手里的远端 Binder
+            }
+
             @Override
             public int add(int a, int b) throws RemoteException {
                 Parcel _data = Parcel.obtain();
@@ -1150,15 +1161,15 @@ public interface ICalc extends android.os.IInterface {
                 }
             }
         }
-        
-        // asInterface：自动判断本地/远程
+
+        // 本进程能查到本地接口就返回它，否则包一层 Proxy
         public static ICalc asInterface(IBinder obj) {
             if (obj == null) return null;
             IInterface iin = obj.queryLocalInterface(DESCRIPTOR);
             if (iin != null && iin instanceof ICalc) {
-                return (ICalc) iin; // 本地直接调用
+                return (ICalc) iin; // 当前进程里就是这个 Stub，之后 add() 是普通 Java 调用
             }
-            return new Proxy(obj);      // 远程走IPC
+            return new Proxy(obj); // 没有挂本地接口，之后 add() 走 transact
         }
     }
 }
@@ -1182,9 +1193,32 @@ public interface ICalc extends android.os.IInterface {
 
 
 
-结果太大，超过 Binder 传输限制（约 1MB），例如大图或大量数据。
 
-**`linkToDeath/unlinkToDeath` 是 Binder 健壮性的基石。** 只要涉及跨进程调用，就必须通过它们来感知服务端存活状态，实现自动重连或优雅降级，至今仍是官方推荐的最佳实践。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+建议按这个顺序补这 6 个点：
+
+1. `oneway`：异步调用，没有返回值，也不能有 `out` / `inout`。
+2. 回调：参数本身是另一个 AIDL 接口，服务端拿它再调回客户端。
+3. 异常：`writeNoException` / `readException`，以及 `DeadObjectException`、`TransactionTooLargeException`。
+4. 死亡通知：`linkToDeath` / `binderDied`。
+5. 线程：服务端跑在 Binder 线程池，主线程调用会 ANR，双向同步调用可能死锁。
+6. 调用方身份：`getCallingUid` / `getCallingPid`，以及 `clearCallingIdentity`。
+
+结果太大，超过 Binder 传输限制（约 1MB），例如大图或大量数据。
 
 
 
