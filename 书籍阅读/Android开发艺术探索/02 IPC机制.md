@@ -1175,8 +1175,531 @@ public interface ICalc extends android.os.IInterface {
 }
 ```
 
+---
+
+同一个 `IBinder` 代理对象的调用按发送顺序串行执行，不会并发；不同代理对象之间的调用互不干扰，执行顺序无法保证，所以服务端 Binder 一定要考虑并发问题。
+
+```java
+// === 客户端 ===
+new ServiceConnection() {
+    @Override
+    public void onServiceConnected(ComponentName name, IBinder service) {
+        // 这个service就是BinderProxy（代理对象）
+        // 同一个ServiceConnection回调中的service始终是同一个代理对象
+        mService = IMyAidlInterface.Stub.asInterface(service);
+    }
+}
+
+// === 服务端 ===
+public class CalcService extends Service {
+    private final IMyAidlInterface.Stub mBinder = new IMyAidlInterface.Stub() {
+        // 这是Binder实体（在服务端进程中唯一）
+    };
+    
+    @Override
+    public IBinder onBind(Intent intent) {
+        return mBinder;  // 返回的是Binder实体
+    }
+}
+```
+
+
+
+
+
 #### 方向关键字（in/out/inout）
 
+跨进程时，客户端和服务端不共享同一个 Java 对象。数据只能通过 Binder 的 `Parcel` 来回复制。`in`、`out`、`inout` 控制的就是：调用前要不要把对象序列化发给服务端，调用后要不要把服务端的结果写回客户端的原对象。`in`、`out`、`inout` 本质上是告诉 AIDL 编译器生成什么样的 Proxy/Stub 模板代码。
+
+| 方向    | 请求时写入 `_data` | 服务端拿到的对象              | 返回时写入 `_reply` | 客户端对象                 |
+| ------- | ------------------ | ----------------------------- | ------------------- | -------------------------- |
+| `in`    | 写入               | 反序列化得到的新副本          | 不写                | 不变                       |
+| `out`   | 不写               | `new UserInfo()` 创建的空对象 | 写入                | 被 `readFromParcel()` 覆盖 |
+| `inout` | 写入               | 反序列化得到的新副本          | 写入                | 被 `readFromParcel()` 覆盖 |
+
+下面用三个例子介绍下：
+
+```java
+package com.example.app;
+
+import com.example.app.UserInfo;
+
+interface IUserService {
+    void inspect(in UserInfo user);
+    void fill(out UserInfo user);
+    void birthday(inout UserInfo user);
+}
+```
+
++ `in`：只发送，不写回。
+
+```java
+// 服务端
+public void inspect(UserInfo user) {
+    // 收到客户端传来的数据："小明", 20
+    user.name = "服务端修改";
+    user.age = 99;
+}
+
+// 客户端
+UserInfo user = new UserInfo();
+user.name = "小明";
+user.age = 20;
+service.inspect(user);
+// 调用后依然是：
+// user.name == "小明"
+// user.age == 20
+```
+
+```java
+// 客户端Proxy
+public void inspect(UserInfo user) {
+    Parcel _data = Parcel.obtain(), _reply = Parcel.obtain();
+    _data.writeInterfaceToken(DESCRIPTOR);
+    _data.writeTypedObject(user, 0);            // 把"小明",20序列化
+    mRemote.transact(TRANSACTION_inspect, _data, _reply, 0);
+    _reply.readException();
+    // 结束，不读取user的任何结果
+}
+
+// 服务端Stub.onTransact
+case TRANSACTION_inspect:
+    UserInfo _arg0 = data.readTypedObject(UserInfo.CREATOR); // createFromParcel → 新对象
+    this.inspect(_arg0);      // 修改的是服务端进程里的副本
+    reply.writeNoException(); // 不写_arg0
+```
+
++ `out`：不发送原内容，只取回结果。
+
+```java
+// 服务端
+public void fill(UserInfo user) {
+    // 不应依赖客户端原有的name、age
+    user.name = "小红";
+    user.age = 30;
+}
+// 客户端
+UserInfo user = new UserInfo();
+user.name = "小明";
+user.age = 20;
+service.fill(user);
+// 调用后：
+// user.name == "小红"
+// user.age == 30
+```
+
+```java
+// 客户端 Proxy
+public void fill(UserInfo user) {
+    _data.writeInterfaceToken(DESCRIPTOR);
+    // 不写user
+    mRemote.transact(TRANSACTION_fill, _data, _reply, 0);
+    _reply.readException();
+    if (_reply.readInt() != 0) {
+        user.readFromParcel(_reply);   // 覆盖到客户端原来的对象上
+    }
+}
+
+// 服务端 Stub.onTransact
+case TRANSACTION_fill:
+    UserInfo _arg0 = new UserInfo();   // 无参构造，name=null, age=0
+    this.fill(_arg0);
+    reply.writeNoException();
+    reply.writeTypedObject(_arg0, PARCELABLE_WRITE_RETURN_VALUE);
+```
+
+因此，UserInfo 用作 `out` 参数时必须有无参构造函数，并且实现了 Parcelable 中的 `readFromParcel(Parcel)`。
+
++ `inout`：两个方向都做。
+
+```java
+// 服务端
+public void birthday(UserInfo user) {
+    // 收到："小明", 20
+    user.age++;
+}
+
+// 客户端
+UserInfo user = new UserInfo();
+user.name = "小明";
+user.age = 20;
+service.birthday(user);
+// 调用后：
+// user.name == "小明"
+// user.age == 21
+```
+
+```java
+// Proxy：先writeTypedObject(user)，transact()后再user.readFromParcel(_reply)
+// Stub：先readTypedObject得到副本，调用方法，再writeTypedObject(_arg0)写回
+```
+
+`Stub.asInterface()` 会先调用 `queryLocalInterface()`，如果服务在同一进程，它直接返回服务端的 `Stub` 对象，不经过 `Parcel`。这时传入的是普通 Java 引用，`in` 参数也会被服务端改掉，其语义会被修改。（为什么 AIDL 要实现非跨进程的调用？进程是部署配置决定的，不是代码决定的，只要在 Manifest 里加或去掉 `android:process=":remote"`，服务就会在独立进程和主进程之间切换，客户端代码不用改，`asInterface` 会自动选择直连或走 Binder；同一个 AIDL 接口既给自己进程内的模块用，也给其他 App）
+
+---
+
+但在实际开发中，AIDL 里的 out/inout 用得非常少，基本都是使用函数返回值的方式。out 出现的原因其实是为了匹配 Java 这种对象传递的思路，比如调用方创建一个对象，被调用方往里面写入数据，然后调用方可以直接读取该对象里面的数据。但跨进程调用只能复制数据，不能共享对象引用，所以就引入了 out/inout，模拟这种效果。
+
+为什么基本类型为什么不用这些？就像我上面说的原因，因为它不是对象。
+
+#### oneway 异步调用
+
+最典型的场景是服务端回调客户端的时候会使用，下文会介绍。
+
+```java
+interface IUserService {
+    oneway void report(in UserInfo user);   // 单个方法oneway
+    void birthday(inout UserInfo user);     // 普通同步方法
+}
+
+oneway interface IUserCallback {            // 整个接口所有方法都是oneway
+    void onUserChanged(in UserInfo user);
+}
+```
+
+```java
+// 普通方法
+mRemote.transact(CODE, _data, _reply, 0);   // 阻塞，直到服务端执行完
+_reply.readException();                     // 读取异常和out数据
+
+// oneway方法
+mRemote.transact(CODE, _data, null, IBinder.FLAG_ONEWAY);
+// Binder收下数据后立即返回，不传_reply
+```
+
+因为不等待，也就没有 `_reply`，所以：
+
+- 返回值只能是 `void`；
+- 参数只能是 `in`，不能有 `out` 或 `inout`；
+- 服务端抛出的异常，客户端收不到。
+
+注意：
+
++ 异步缓冲区很小，大约只有 Binder 缓冲区的一半，频繁发送或发送大数据，可能导致事务失败（TransactionTooLargeException）。
+
+  ```
+  Binder 总缓冲区（默认 1MB）
+  ┌─────────────────────────────────────┐
+  │  同步缓冲区（~512KB）               │  ← 常规调用使用
+  ├─────────────────────────────────────┤
+  │  异步缓冲区（~512KB）               │  ← oneway 调用使用
+  └─────────────────────────────────────┘
+  ```
+
+  | 调用方式                  | 缓冲区限制           | 典型问题           |
+  | :------------------------ | :------------------- | :----------------- |
+  | **常规调用**（同步）      | 同步缓冲区（~512KB） | 阻塞等待，不会累积 |
+  | **`oneway` 调用**（异步） | 异步缓冲区（~512KB） | 容易累积，可能溢出 |
+
++ 同进程调用时，oneway 不生效，因为会直接调用本地方法，会在调用方线程上同步执行。
+
++ 如果需要结果，可以在参数里传一个 oneway 回调接口，让服务端处理完后再回调客户端。
+
+#### 回调机制
+
+客户端实现一个 AIDL 接口（回调接口），把它作为 Binder 对象传给服务端。之后服务端反过来通过这个 Binder 调用客户端，形成双向 IPC。
+
+1）定义两个 AIDL 接口
+
+```java
+// IRemoteCallback.aidl
+interface IRemoteCallback {
+    void onProgress(int progress);   // 默认同步调用
+    oneway void onDone(String result); // 异步调用，不阻塞服务端
+}
+
+// IRemoteService.aidl
+import com.example.IRemoteCallback;
+interface IRemoteService {
+    void registerCallback(IRemoteCallback cb);
+    void unregisterCallback(IRemoteCallback cb);
+    void startTask();
+}
+```
+
+2）服务端：用 `RemoteCallbackList` 管理回调
+
+```java
+public class RemoteService extends Service {
+    
+    /**
+     * 回调列表管理器
+     * 为什么不用ArrayList？
+     * - 跨进程传递后，同一回调对象每次会被反序列化成新的Proxy实例
+     * - ArrayList.remove() 依赖 equals()，但 Proxy 对象每次都不相同
+     * - RemoteCallbackList 内部以 cb.asBinder()（底层 Binder 对象）作为 key
+     * - 自动处理死亡（linkToDeath），线程安全
+     * 跨进程传递后，客户端的同一个回调对象每次到服务端都会被反序列化成新的代理对象，所以 `list.remove(cb)` 删不掉。`RemoteCallbackList` 内部以 `cb.asBinder()`（同一个底层 Binder）作为 key，因此注册和注销能对上。它还会通过 `linkToDeath` 在客户端进程死亡时自动移除回调，并且是线程安全的。
+     */
+    private final RemoteCallbackList<IRemoteCallback> mCallbacks = new RemoteCallbackList<>();
+
+    /**
+     * Binder服务实现
+     * 继承IRemoteService.Stub，实现AIDL接口定义的方法
+     */
+    private final IRemoteService.Stub mBinder = new IRemoteService.Stub() {
+        
+        /**
+         * 客户端调用registerCallback(mCallback)时，mCallback是Stub实例
+         * 传到服务端后变成Proxy实例，但底层Binder对象是同一个
+         */
+        public void registerCallback(IRemoteCallback cb) { 
+            // cb就是BinderProxy
+            if (cb != null) {
+                mCallbacks.register(cb);  // 加入回调列表
+            }
+        }
+        
+        /**
+         * 客户端主动调用或进程死亡时触发
+         * RemoteCallbackList会自动通过linkToDeath清理死亡进程的回调
+         */
+        public void unregisterCallback(IRemoteCallback cb) {
+            if (cb != null) {
+                mCallbacks.unregister(cb);  // 从列表中移除
+            }
+        }
+        
+        /**
+         * 启动任务，这里模拟一个异步任务，完成后通知所有
+         */
+        public void startTask() { 
+            // 开启子线程执行耗时任务，避免阻塞Binder线程池
+            new Thread(() -> {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                notifyDone("任务完成");  // 通知所有端
+            }).start(); 
+        }
+    };
+
+    /**
+     * 通知所有端任务完成
+     * 核心方法：遍历回调列表并逐个调用
+     * 
+     * 关键约束：
+     * 1. beginBroadcast() 和 finishBroadcast() 必须成对调用
+     * 2. 遍历过程中不能register/unregister，否则抛ConcurrentModifiedException
+     * 3. 必须在finally中调用finishBroadcast()，否则后续beginBroadcast()会失败
+     */
+    private void notifyDone(String r) {
+        // 返回当前注册的回调数量，内部会加锁并复制当前回调到临时数组，避免遍历过程中被修改
+        int n = mCallbacks.beginBroadcast();
+        
+        try {
+            // 遍历所有注册的回调
+            for (int i = 0; i < n; i++) {
+                try { 
+                    // 获取第i个回调对象（IRemoteCallback.Proxy）
+                    // 调用onDone()会通过Binder驱动反向调用客户端的Stub.onTransact()
+                    mCallbacks.getBroadcastItem(i).onDone(r); 
+                } catch (RemoteException e) { 
+                    // 端进程已死或连接断开
+                    // RemoteCallbackList会自动检测到并清理该回调
+                    // 无需手动处理
+                }
+            }
+        } finally {
+            // 结束广播，释放锁并清空临时数组
+            // 必须在finally中调用，确保异常情况下也能释放
+            mCallbacks.finishBroadcast();
+        }
+    }
+
+    /**
+     * 绑定服务时返回Binder对象
+     * 客户端通过bindService()绑定后，系统调用此方法获取IBinder
+     * 客户端拿到后通过IRemoteService.Stub.asInterface(b)转换为Proxy
+     */
+    @Override 
+    public IBinder onBind(Intent i) { 
+        return mBinder;  // 返回服务实现对象
+    }
+    
+    /**
+     * 服务销毁时清理资源
+     * 必须调用kill()释放所有回调引用，防止内存泄漏
+     */
+    @Override 
+    public void onDestroy() { 
+        mCallbacks.kill();  // 清空回调列表并释放资源
+        super.onDestroy();
+    }
+}
+```
+
+3）客户端
+
+```java
+private final IRemoteCallback.Stub mCallback = new IRemoteCallback.Stub() {
+    public void onProgress(int p) { 
+      	mHandler.post(() -> updateUi(p)); 
+    }
+    public void onDone(String r)  { 
+      	mHandler.post(() -> showResult(r)); 
+    }
+};
+
+private final ServiceConnection mConn = new ServiceConnection() {
+    public void onServiceConnected(ComponentName n, IBinder b) {
+        mService = IRemoteService.Stub.asInterface(b);
+        try { 
+          	mService.registerCallback(mCallback); 
+          	mService.startTask(); 
+        } catch (RemoteException e) { 
+          	e.printStackTrace(); 
+        }
+    }
+    public void onServiceDisconnected(ComponentName n) { 
+      	mService = null; 
+    }
+};
+
+@Override 
+protected void onDestroy() {
+    try { 
+      	if (mService != null) {
+        		mService.unregisterCallback(mCallback); 
+      	}
+    } catch (RemoteException ignored) {}
+    unbindService(mConn);
+    super.onDestroy();
+}
+```
+
+
+
+
+
+1. 客户端的 `Stub` 本身就是 `Binder` 实体，传给服务端时，Binder 驱动会把它转换成服务端进程中的 `BinderProxy`。
+2. 服务端调用 `cb.onDone()` 时，实际走的是 `Proxy → transact → 驱动 → 客户端 Stub.onTransact`。
+3. 此时双方的角色互换：客户端变成了这次调用的“服务端”。
+
+
+
+
+
+> **AIDL 回调 = Client 把自己的 Stub 注册到 Server，Server 通过持有的 Proxy 反向调用 Client 的 Stub**
+
+这就是"反转"的本质：**Stub 和 Proxy 的角色在两次调用中互换了**。
+
+
+
+
+
+
+
+正常写法：客户端 → 服务端
+
+```java
+// ICalc.aidl
+interface ICalc { int add(int a, int b); }
+
+// 服务端实现真实对象（Stub）
+public class CalcService extends Service {
+    private final ICalc.Stub mBinder = new ICalc.Stub() {
+        @Override public int add(int a, int b) { return a + b; }   // 真正执行的地方
+    };
+    @Override public IBinder onBind(Intent i) { return mBinder; }  // 交给系统
+}
+
+// 客户端拿到代理并调用
+public void onServiceConnected(ComponentName n, IBinder service) {
+    // service = BinderProxy
+    calcService = ICalc.Stub.asInterface(service);   // = ICalc.Stub.Proxy
+    int r = calcService.add(1, 2);                    // 阻塞，直到拿到 3
+}
+```
+
+AIDL 简化了下面的代码：
+
+```java
+// 客户端进程：ICalc.Stub.Proxy
+public int add(int a, int b) {
+    data.writeInt(a); data.writeInt(b);
+    mRemote.transact(TRANSACTION_add, data, reply, 0);  // mRemote = service(BinderProxy)
+    return reply.readInt();                             // 读出返回值 3
+}
+
+// 服务端进程：ICalc.Stub.onTransact
+case TRANSACTION_add:
+    int a = data.readInt(), b = data.readInt();
+    int result = this.add(a, b);                        // 调用自己的实现
+    reply.writeInt(result);                             // 写回结果
+```
+
+
+
+
+
+回调写法：服务端 → 客户端
+
+```java
+// IRemoteCallback.aidl
+interface IRemoteCallback { void onDone(String result); }
+// IRemoteService.aidl
+interface IRemoteService { void registerCallback(IRemoteCallback cb); void startTask(); }
+
+
+// 客户端实现真实对象（Stub）：角色反过来了
+private final IRemoteCallback.Stub mCallback = new IRemoteCallback.Stub() {
+    @Override public void onDone(String r) {          // 真正执行的地方（在客户端）
+        mHandler.post(() -> textView.setText(r));      // Binder 线程，切回主线程
+    }
+};
+
+// 客户端把它“递”给服务端：这一步本身是一次正常调用
+public void onServiceConnected(ComponentName n, IBinder service) {
+    mService = IRemoteService.Stub.asInterface(service);
+    mService.registerCallback(mCallback);   // 把自己的 Stub 作为参数传过去
+    mService.startTask();                   // 立即返回，不等结果
+}
+```
+
+```java
+// 服务端保存cb，任务完成后反向调用
+// IRemoteCallback.Stub.Proxy
+public void registerCallback(IRemoteCallback cb) { mCallbacks.register(cb); }
+
+public void startTask() {
+    new Thread(() -> {
+        String result = doHeavyWork();
+        int n = mCallbacks.beginBroadcast();
+        for (int i = 0; i < n; i++) {
+            try { mCallbacks.getBroadcastItem(i).onDone(result); }  // cb.onDone()
+            catch (RemoteException ignored) {}
+        }
+        mCallbacks.finishBroadcast();
+    }).start();
+}
+```
+
+AIDL 简化了下面的代码：
+
+```java
+// 客户端：IRemoteService.Stub.Proxy.registerCallback
+data.writeStrongBinder(cb.asBinder());          // 写入的是客户端的 Stub（Binder 实体）
+mRemote.transact(TRANSACTION_registerCallback, data, reply, 0);
+
+// 服务端：IRemoteService.Stub.onTransact
+case TRANSACTION_registerCallback:
+    IBinder b = data.readStrongBinder();          // 驱动已把它转成 BinderProxy
+    IRemoteCallback cb = IRemoteCallback.Stub.asInterface(b);  // = IRemoteCallback.Stub.Proxy
+    this.registerCallback(cb);                    // 进入你的实现，存起来
+```
+
+```java
+// 服务端进程：IRemoteCallback.Stub.Proxy.onDone
+data.writeString(r);
+mRemote.transact(TRANSACTION_onDone, data, reply, 0);   // mRemote = 指向客户端的 BinderProxy
+
+// 客户端进程：IRemoteCallback.Stub.onTransact
+case TRANSACTION_onDone:
+    this.onDone(data.readString());                       // 调用 ① 的 mCallback.onDone
+```
 
 
 
@@ -1202,29 +1725,17 @@ public interface ICalc extends android.os.IInterface {
 
 
 
+#### 常见异常
 
+`writeNoException` / `readException`，以及 `DeadObjectException`、`TransactionTooLargeException`。
 
+#### 死亡通知
 
+死亡通知：`linkToDeath` / `binderDied`。
 
+#### 调用方身份
 
-
-
-建议按这个顺序补这 6 个点：
-
-1. `oneway`：异步调用，没有返回值，也不能有 `out` / `inout`。
-2. 回调：参数本身是另一个 AIDL 接口，服务端拿它再调回客户端。
-3. 异常：`writeNoException` / `readException`，以及 `DeadObjectException`、`TransactionTooLargeException`。
-4. 死亡通知：`linkToDeath` / `binderDied`。
-5. 线程：服务端跑在 Binder 线程池，主线程调用会 ANR，双向同步调用可能死锁。
-6. 调用方身份：`getCallingUid` / `getCallingPid`，以及 `clearCallingIdentity`。
-
-结果太大，超过 Binder 传输限制（约 1MB），例如大图或大量数据。
-
-
-
-
-
-
+调用方身份：`getCallingUid` / `getCallingPid`，以及 `clearCallin
 
 ### 使用 ContentProvider
 
