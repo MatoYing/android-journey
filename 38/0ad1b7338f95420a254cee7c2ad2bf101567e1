@@ -1,0 +1,16 @@
+"书籍阅读/Android开发艺术探索/02 IPC机制.md"
+  h_754d50daf215ac 1178-1209,1212-1573,1577-1579,1585,1587,1595-1708,1728,1730,1732,1734,1736,1738
+"书籍阅读/Android开发艺术探索/04 View的工作原理.md"
+  h_754d50daf215ac 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "380ad1b7338f95420a254cee7c2ad2bf101567e1",
+  "prompts": {},
+  "humans": {
+    "h_754d50daf215ac": {
+      "author": "sjma67 <sichao_yan@saic-gm.com>"
+    }
+  }
+}
